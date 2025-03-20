@@ -6,6 +6,7 @@ from dotenv import load_dotenv
 import os
 import pandas as pd
 import altair as alt
+import matplotlib.pyplot as plt
 
 # Load environment variables from .env
 load_dotenv()
@@ -82,15 +83,10 @@ CATEGORIES = {
     ]
 }
 
-# Weights for Categories
-WEIGHTS = {
-    "Visual Accessibility": 0.25,
-    "Audio Accessibility": 0.15,
-    "Motor Accessibility": 0.25,
-    "Cognitive Accessibility": 0.20,
-    "General Accessibility Features": 0.10,
-    "Localization": 0.05,
-}
+# New Weights for Categories (Equal Weighting, out of 20 points)
+NUM_CATEGORIES = len(CATEGORIES)
+EQUAL_WEIGHT = 20 / NUM_CATEGORIES
+NEW_WEIGHTS = {category: EQUAL_WEIGHT for category in CATEGORIES}
 
 def calculate_score(selections: dict) -> Tuple[float, dict]:
     """Calculates the accessibility score based on user selections and returns category scores."""
@@ -105,7 +101,7 @@ def calculate_score(selections: dict) -> Tuple[float, dict]:
                 category_score += 2
             elif selections.get(option, False) == "Extensive":
                 category_score += 3
-        weighted_score = WEIGHTS[category] * category_score
+        weighted_score = NEW_WEIGHTS[category] * (category_score / 3 / len(CATEGORIES[category]) if len(CATEGORIES[category]) > 0 else 0) # Normalize by max points per category
         total_score += weighted_score
         category_scores[category] = round(weighted_score, 2)
     return round(total_score, 2), category_scores
@@ -146,9 +142,59 @@ def insert_data_supabase(conn: psycopg2.extensions.connection, game_name: str, g
         st.error(f"An error occurred: {e}")
         return False
 
+def handle_submit(game_name, selections, conn, other_languages):
+    """Handles the form submission logic."""
+    if not game_name:
+        st.error("Please enter the game name.")
+        return
+
+    # Calculate the score
+    score, category_scores = calculate_score(selections)
+
+    # Insert data into Supabase
+    if insert_data_supabase(conn, game_name, "", selections, score, other_languages):  # Pass empty string for description
+        st.success(f"🎉 Data submitted successfully! Your submission is pending review. Your Accessibility Score: **{score:.2f}/20** 🎉")
+        st.session_state['form_submitted'] = True
+        st.session_state['score'] = score
+        st.session_state['category_scores'] = category_scores
+        st.rerun()
+    else:
+        st.error("Failed to submit data. Please check the console for errors.")
+
+
 def main():
     """Main function to run the Streamlit app."""
-    st.title("Game Accessibility Submission Form")
+    st.markdown("<h1 style='text-align: center;'>Game Accessibility Submission Form 🎮</h1>", unsafe_allow_html=True)
+
+    # 🎮 Welcome to the Game Accessibility Submission Form! 🕹️
+    #
+    # This form is designed to help you evaluate and submit information about
+    # the accessibility features present in your game. By providing details about
+    # various accessibility options, you contribute to making games more inclusive
+    # for everyone.
+    #
+    # 📊 How the Score is Calculated (Out of 20 Points):
+    # The overall accessibility score is now out of a total of 20 points.
+    # Each of the following categories is weighted equally, contributing approximately
+    # 3.33 points each to the total score:
+    # - Visual Accessibility
+    # - Audio Accessibility
+    # - Motor Accessibility
+    # - Cognitive Accessibility
+    # - General Accessibility Features
+    # - Localization
+    #
+    # 📝 How Points are Awarded:
+    # For each selected accessibility feature, a score is awarded based on its
+    # implementation level:
+    # - None: 0 points
+    # - Basic: 1 point
+    # - Customizable: 2 points
+    # - Extensive: 3 points
+    #
+    # The score for each category is calculated by summing the points for the
+    # selected features within it. This sum is then normalized and weighted to
+    # contribute equally to the total score out of 20 points.
 
     # Initialize database connection
     conn = init_supabase_client(USER, PASSWORD, HOST, PORT, DBNAME)
@@ -156,17 +202,26 @@ def main():
         st.error("Failed to connect to the database. Please check your connection details and try again.")
         return  # Stop if the connection fails
 
-    form_submitted = False
+    if 'form_submitted' not in st.session_state:
+        st.session_state['form_submitted'] = False
 
-    if not form_submitted:
+    if not st.session_state['form_submitted']:
+        st.subheader("Game Information 📝")
         # Game Name and Description Input
-        game_name = st.text_input("Enter the Name of the Game:", "")
-        game_description = st.text_area("Enter a brief description of the game:", "")
+        game_name = st.text_input("Enter the Name of the Game:", placeholder="e.g., Awesome Adventure")
+        # Removed game_description input
 
-        # Accessibility Feature Selection
+        st.subheader("Accessibility Features ⚙️")
+        st.write("**How Points Work:** Select the implementation level for each feature:")
+        st.markdown("- None: 0 points")
+        st.markdown("- Basic: 1 point")
+        st.markdown("- Customizable: 2 points")
+        st.markdown("- Extensive: 3 points")
+        st.write("The total accessibility score will be out of **20 points**.")
+
         selections = {}
         for category, options in CATEGORIES.items():
-            st.subheader(category)
+            st.subheader(f"➡️ {category}")
             for option in options:
                 selections[option] = st.selectbox(
                     option,
@@ -187,29 +242,16 @@ def main():
             languages_list = []
 
         # Language Selection (for Localization)
+        st.subheader("Localization 🌍")
         other_languages = st.multiselect("Select the languages supported by the game:", languages_list)
 
-        # Submit Button
-        if st.button("Submit for Review", key="submit_button"):
-            if not game_name:
-                st.error("Please enter the game name.")
-            elif not game_description:
-                st.error("Please enter the game description")
-            else:
-                # Calculate the score
-                score, category_scores = calculate_score(selections)
-                # Insert data into Supabase
-                if insert_data_supabase(conn, game_name, game_description, selections, score, other_languages):
-                    st.success(f"Data submitted successfully! Your submission is pending review. Your Accessibility Score: {score}")
-                    st.session_state['form_submitted'] = True
-                    st.session_state['score'] = score
-                    st.session_state['category_scores'] = category_scores
-                else:
-                    st.error("Failed to submit data. Please check the console for errors.")
+    if not st.session_state['form_submitted']:
+        if st.button("Submit for Review 🚀", key="submit_button") and not st.session_state['form_submitted']:
+            handle_submit(game_name, selections, conn, other_languages)
 
-    if 'form_submitted' in st.session_state and st.session_state['form_submitted']:
-        st.subheader("Accessibility Score Breakdown")
-        st.write(f"Your overall accessibility score is: **{st.session_state['score']}**")
+    if st.session_state['form_submitted']:
+        st.subheader("Accessibility Score Breakdown 📊")
+        st.write(f"Your overall accessibility score is: **{st.session_state['score']:.2f}/20**")
         st.write("Here's a breakdown of your score by category:")
 
         category_data = []
@@ -218,28 +260,76 @@ def main():
 
         df = pd.DataFrame(category_data)
 
-        # Create the bar chart using Altair
-        chart = alt.Chart(df).mark_bar().encode(
-            x='Category:N',
-            y='Score:Q',
-            tooltip=['Category', 'Score']
-        ).properties(
-            title='Accessibility Score by Category'
-        )
-        st.altair_chart(chart, use_container_width=True)
+        if not df.empty:
+            # Create the bar chart using Altair
+            chart = alt.Chart(df).mark_bar().encode(
+                x=alt.X('Category:N', sort=None, axis=alt.Axis(title='Category')), # Add axis title
+                y=alt.Y('Score:Q', axis=alt.Axis(title='Score')), # Add axis title
+                tooltip=['Category', 'Score']
+            ).properties(
+                title='Accessibility Score by Category (Out of 20)'
+            ).interactive() # Make the chart interactive
+            st.altair_chart(chart, use_container_width=True)
 
-        st.write("\n**Explanation of Calculations:**")
-        st.write("The overall accessibility score is calculated by considering the presence and level of implementation of various accessibility features across different categories.")
-        st.write("For each selected accessibility feature, a score is assigned based on its implementation level:")
+            # Additional Data Statistics
+            st.subheader("More Insights 📈")
+            st.write("Here's a view of the percentage of features selected for each category:")
+
+            category_feature_counts = {}
+            for category, options in CATEGORIES.items():
+                category_feature_counts[category] = len(options)
+
+            category_percentages = []
+            for category, score in st.session_state['category_scores'].items():
+                max_score_per_category = 3 * category_feature_counts.get(category, 0)
+                if max_score_per_category > 0:
+                    percentage = (score / NEW_WEIGHTS[category]) * (NEW_WEIGHTS[category] / max_score_per_category) * 100
+                    category_percentages.append({'Category': category, 'Percentage of Max': percentage})
+                else:
+                    category_percentages.append({'Category': category, 'Percentage of Max': 0})
+
+            df_percentages = pd.DataFrame(category_percentages)
+
+            # Bar Chart using Altair for Percentages
+            percentage_chart = alt.Chart(df_percentages).mark_bar().encode(
+                x=alt.X('Category:N', sort=None, axis=alt.Axis(title='Category')),
+                y=alt.Y('Percentage of Max:Q', title='Percentage of Max Features (%)'),
+                tooltip=['Category', alt.Tooltip('Percentage of Max', format='.1f')]
+            ).properties(
+                title='Percentage of Maximum Possible Features Implemented per Category'
+            ).interactive()
+            st.altair_chart(percentage_chart, use_container_width=True)
+
+            # Pie Chart using Altair for Percentages
+            pie_chart = alt.Chart(df_percentages).mark_arc(outerRadius=120).encode(
+                theta=alt.Theta(field="Percentage of Max", type="quantitative"),
+                color=alt.Color(field="Category", type="nominal"),
+                order=alt.Order("Percentage of Max", sort="descending"),
+                tooltip=["Category", alt.Tooltip("Percentage of Max", format=".1f")]
+            ).properties(
+                title='Percentage of Maximum Possible Features per Category (Pie Chart)'
+            ).interactive()
+            st.altair_chart(pie_chart, use_container_width=True)
+
+        else:
+            st.warning("No category scores to display.")
+
+        st.write("\n**Explanation of Calculations 💡:**")
+        st.write("The overall accessibility score is now out of 20 points, with each of the 6 main categories contributing equally.")
+        st.write("For each selected accessibility feature, a score is awarded based on its implementation level:")
         st.markdown("- **None:** 0 points")
         st.markdown("- **Basic:** 1 point")
         st.markdown("- **Customizable:** 2 points")
         st.markdown("- **Extensive:** 3 points")
-        st.write("These individual scores for each feature within a category are then summed up.")
-        st.write("Finally, the score for each category is multiplied by a predefined weight to calculate the overall accessibility score.")
-        st.write("The weights for each category are as follows:")
-        for cat, weight in WEIGHTS.items():
-            st.markdown(f"- **{cat}:** {weight}")
+        st.write("The score for each category is calculated by summing the points for the selected features within it. This sum is then normalized and weighted to contribute to the total score of 20 points.")
+        st.write("**Category Weights (Equal):**")
+        for cat in CATEGORIES.keys():
+            st.markdown(f"- **{cat}:** {EQUAL_WEIGHT:.2f} points")
+
+        # Button to submit another form
+        if st.button("Submit Another Form 📝"):
+            st.session_state['form_submitted'] = False
+            st.rerun()
 
     if conn:
         conn.close()
