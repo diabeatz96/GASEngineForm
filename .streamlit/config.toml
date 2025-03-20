@@ -1,0 +1,7 @@
+[theme]
+# Base colors
+primaryColor = "#00ff00"       # Bright Green (Neon) - Use for primary actions/buttons
+backgroundColor = "#1e1e1e"    # Dark Charcoal Grey - Good for background
+secondaryBackgroundColor = "#282828" # Slightly lighter dark grey for containers
+textColor = "#ffffff"          # White - High contrast on dark background
+iconColor = "#00ff00"          # Same as primary for consistency
