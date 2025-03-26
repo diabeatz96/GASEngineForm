@@ -2,3 +2,4 @@
 .env
 ./.streamlit
 .streamlit/secrets.toml
+.vscode/settings.json
